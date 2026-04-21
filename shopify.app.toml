@@ -1,0 +1,46 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "9bd57d484a166e0c0e595a4fe454d9c4"
+name = "DreamLitXSimplSo"
+application_url = "https://example.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  # Fallback capture: whenever a customer is created with marketing consent,
+  # mirror the record into the newsletter store. See
+  # app/routes/webhooks.customers.create.tsx for the consent filter.
+  [[webhooks.subscriptions]]
+  topics = [ "customers/create" ]
+  uri = "/webhooks/customers/create"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+# read_customers lets us correlate a submission back to a Shopify customer
+# record if one exists; write_customers is not required for this app and is
+# intentionally omitted (principle of least privilege).
+scopes = "read_customers"
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[app_proxy]
+# Merchant-facing URL: https://{shop}.myshopify.com/apps/dreamlit/*
+# Shopify forwards to: https://{app_url}/apps/*  (with signed query params)
+# The route file app/routes/apps.newsletter.tsx handles /apps/newsletter.
+url = "https://example.com/apps"
+subpath = "dreamlit"
+prefix = "apps"

@@ -1,0 +1,89 @@
+// Prisma schema — DreamLitxSimplSo
+//
+// Design note: the ingestion model is intentionally thin. Only the columns we
+// actually query on (shop, email, createdAt) get real columns. Everything else
+// that Shopify sends on a newsletter form — known today or added tomorrow —
+// lands in `meta` (normalized) and `rawPayload` (byte-for-byte replay copy).
+// This keeps the schema stable when Shopify evolves its form structure.
+//
+// ⚠️  IDE warning about `url` / `directUrl` "no longer supported":
+// That's the Prisma VS Code extension emitting Prisma 7 preview rules. This
+// project is pinned to Prisma 6 because @shopify/shopify-app-session-storage-
+// prisma (all versions up to 9.0.0) still peer-depends on prisma@^6.19.0 and
+// @prisma/client@^6.19.0. Prisma 6 fully supports `url` and `directUrl` here
+// — our `prisma migrate dev` ran cleanly against Supabase on this schema.
+// When Shopify ships a Prisma 7-compatible session storage, migrate the URLs
+// to prisma.config.ts per https://pris.ly/d/config-datasource. Until then,
+// ignore the squiggle; build and type-check both pass.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Required by @shopify/shopify-app-session-storage-prisma. Don't remove.
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+// Captured newsletter submission.
+//
+// `meta` holds the normalized known-ish fields (first_name, last_name, phone,
+// accepts_marketing, tags, source, custom_*). It's a Json column so schema
+// migrations aren't needed when Shopify adds new `contact[*]` inputs.
+//
+// `rawPayload` is the original payload verbatim (form-encoded parsed to JSON)
+// so we can replay or debug what the theme actually sent.
+model NewsletterSubmission {
+  id         String   @id @default(cuid())
+  shop       String
+  email      String?
+  source     String?
+  meta       Json     @default("{}")
+  rawPayload Json     @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([shop, email], name: "shop_email_unique")
+  @@index([shop])
+  @@index([createdAt])
+}
+
+// Raw inbound request envelope. Kept separate from NewsletterSubmission so a
+// failed/rejected request is still retrievable for debugging, and so we can
+// prune them independently on a shorter retention.
+model RawPayloadLog {
+  id         String   @id @default(cuid())
+  shop       String?
+  route      String
+  headers    Json     @default("{}")
+  body       Json     @default("{}")
+  ip         String?
+  status     Int
+  errorCode  String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([shop])
+}

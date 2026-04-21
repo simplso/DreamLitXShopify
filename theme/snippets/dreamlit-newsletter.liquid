@@ -1,0 +1,148 @@
+{% doc %}
+  Newsletter signup form that mirrors every submitted field to the
+  DreamLitxSimplSo app via App Proxy, without disabling Shopify's native
+  customer-creation flow.
+
+  Install:
+    1. Copy this file to `snippets/dreamlit-newsletter.liquid` in your theme.
+    2. Render it where you want the form:
+         {% render 'dreamlit-newsletter', source: 'footer' %}
+    3. Ensure the app proxy is configured in shopify.app.toml
+       (subpath: dreamlit, prefix: apps) and the app is installed on the store.
+
+  @param {string} [source] - Optional label stored as `meta.source` (e.g. 'footer', 'popup').
+  @param {string} [proxy_path] - Override proxy subpath. Default: '/apps/dreamlit/newsletter'.
+
+  @example
+  {% render 'dreamlit-newsletter', source: 'footer' %}
+{% enddoc %}
+
+{%- liquid
+  assign proxy = proxy_path | default: '/apps/dreamlit/newsletter'
+  assign src = source | default: ''
+-%}
+
+<form
+  is="dreamlit-newsletter"
+  class="dreamlit-newsletter"
+  data-dreamlit-proxy="{{ proxy }}"
+  data-dreamlit-source="{{ src }}"
+  method="post"
+  action="/contact#dreamlit_form"
+  accept-charset="UTF-8"
+>
+  {%- comment -%}
+    We hand-roll the <form> instead of using {% form 'customer' %} so our JS
+    can intercept submit cleanly and so the hidden `form_type` travels to the
+    same Shopify endpoint. The behavior is byte-equivalent to {% form 'customer' %}.
+  {%- endcomment -%}
+  <input type="hidden" name="form_type" value="customer">
+  <input type="hidden" name="utf8" value="✓">
+  <input type="hidden" name="contact[tags]" value="newsletter">
+  {%- if src != blank -%}
+    <input type="hidden" name="source" value="{{ src }}">
+  {%- endif -%}
+
+  {%- comment -%}
+    Honeypot. Real users never see this; bots happily fill it in. The backend
+    silently drops any submission where it's populated.
+  {%- endcomment -%}
+  <div class="dreamlit-hp" aria-hidden="true">
+    <label>
+      Do not fill this out:
+      <input type="text" name="website" autocomplete="off" tabindex="-1">
+    </label>
+  </div>
+
+  <div class="dreamlit-field">
+    <label for="DreamlitEmail-{{ src }}">Email</label>
+    <input
+      type="email"
+      id="DreamlitEmail-{{ src }}"
+      name="contact[email]"
+      autocomplete="email"
+      required
+    >
+  </div>
+
+  <div class="dreamlit-field">
+    <label for="DreamlitFirstName-{{ src }}">First name</label>
+    <input
+      type="text"
+      id="DreamlitFirstName-{{ src }}"
+      name="contact[first_name]"
+      autocomplete="given-name"
+    >
+  </div>
+
+  <button type="submit" class="dreamlit-submit">Subscribe</button>
+
+  <p class="dreamlit-status" role="status" aria-live="polite" hidden></p>
+</form>
+
+{% stylesheet %}
+  .dreamlit-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  .dreamlit-newsletter { display: grid; gap: 0.5rem; max-width: 28rem; }
+  .dreamlit-field { display: grid; gap: 0.25rem; }
+  .dreamlit-status[data-state="ok"] { color: #1a7f37; }
+  .dreamlit-status[data-state="err"] { color: #b42318; }
+{% endstylesheet %}
+
+{% javascript %}
+  // Custom element: forwards submission to the app proxy with ALL form fields
+  // (dynamic — never hardcoded) then lets Shopify's native /contact endpoint
+  // complete. Submit-to-proxy is best-effort; a failure there doesn't block
+  // the native flow.
+  class DreamlitNewsletter extends HTMLFormElement {
+    connectedCallback() {
+      this.addEventListener('submit', this.onSubmit.bind(this));
+    }
+    async onSubmit(e) {
+      const proxy = this.dataset.dreamlitProxy;
+      if (!proxy) return; // Without a proxy, just let Shopify handle it.
+
+      // Don't block the user — fire proxy copy in parallel, native submit
+      // continues. If you'd rather gate on proxy success, preventDefault
+      // here and call this.submit() after the fetch resolves.
+      const fd = new FormData(this);
+      const payload = {};
+      fd.forEach((v, k) => {
+        if (payload[k] === undefined) payload[k] = v;
+        else if (Array.isArray(payload[k])) payload[k].push(v);
+        else payload[k] = [payload[k], v];
+      });
+
+      const status = this.querySelector('.dreamlit-status');
+      try {
+        const res = await fetch(proxy, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload),
+          credentials: 'same-origin',
+          keepalive: true,
+        });
+        if (status) {
+          if (res.ok) {
+            status.hidden = false;
+            status.dataset.state = 'ok';
+            status.textContent = 'Subscribed.';
+          } else {
+            status.hidden = false;
+            status.dataset.state = 'err';
+            status.textContent = 'Could not subscribe — please try again.';
+          }
+        }
+      } catch (_err) {
+        if (status) {
+          status.hidden = false;
+          status.dataset.state = 'err';
+          status.textContent = 'Network error.';
+        }
+      }
+    }
+  }
+
+  if (!customElements.get('dreamlit-newsletter')) {
+    customElements.define('dreamlit-newsletter', DreamlitNewsletter, { extends: 'form' });
+  }
+{% endjavascript %}
